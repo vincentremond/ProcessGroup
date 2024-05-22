@@ -1,5 +1,9 @@
 source https://api.nuget.org/v3/index.json
+source ~/nuget
 
 storage: none
+
 nuget FSharp.Core
 nuget Vanara.PInvoke.NtDll
+nuget Vanara.PInvoke.Kernel32
+nuget Pinicola.FSharp.SpectreConsole
