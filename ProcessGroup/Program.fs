@@ -141,7 +141,7 @@ while true do
             else
                 "grey"
         
-        let paddingLeft = (String.replicate depth "  ")
+        let paddingLeft = (String.replicate depth "    ")
         let memoryUsage = printMemoryUsage processTree.CumulativeMemoryUsage
         
         // printfn $"%s{paddingLeft}%s{processTree.Name} (Pid: {processTree.Pid}) {memoryUsage}"
