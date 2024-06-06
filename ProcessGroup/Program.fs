@@ -26,6 +26,7 @@ type ProcessSummary = {
     Name: string
     ParentPid: int option
     MemoryUsage: int64
+    Priority: ProcessPriorityClass option
 }
 
 type ProcessTree = {
@@ -58,8 +59,14 @@ let getParentPid o : int option =
     | NestedException(e: InvalidOperationException) when Regex.IsMatch(e.Message, "^Cannot process request because the process \\(\\d+\\) has exited") -> None
 
 while true do
-    
+
     AnsiConsole.Clear()
+
+    let tryGetPriorityClass (p: Process) =
+        try
+            Some p.PriorityClass
+        with NestedException(e: Win32Exception) ->
+            None
 
     let processes =
         Process.GetProcesses()
@@ -69,6 +76,7 @@ while true do
             Name = p.ProcessName
             ParentPid = (getParentPid p)
             MemoryUsage = p.PrivateMemorySize64
+            Priority = tryGetPriorityClass p
         })
 
     let forceNotParentProcesses =
@@ -79,7 +87,6 @@ while true do
         |> List.choose (fun p -> processes |> List.tryFind (fun x -> x.Name = p))
         |> List.map (_.Pid)
         |> Set.ofList
-
 
     let allPids = processes |> List.map (_.Pid) |> Set.ofSeq
 
@@ -112,6 +119,26 @@ while true do
             stillOrphans
         )
 
+    let rec updateProcessTreePriority nameCondition (processTrees: ProcessTree list) priority =
+
+        let (|IsMatch|_|) (name: string) (nameCondition: string option) =
+            match nameCondition with
+            | None -> Some()
+            | Some n when n = name -> Some()
+            | _ -> None
+
+        for processTree in processTrees do
+            match nameCondition with
+            | IsMatch processTree.Name ->
+                let processById = Process.GetProcessById(processTree.Pid)
+
+                if processById.PriorityClass <> priority then
+                    printfn $"Setting priority for {processTree.Name} (Pid: {processTree.Pid}) to {priority}"
+                    processById.PriorityClass <- priority
+
+                updateProcessTreePriority None processTree.Children priority
+            | _ -> ()
+
     let processTrees, processSummaries as result = createProcessTree None processes
 
     let printMemoryUsage (i: int64) =
@@ -130,26 +157,30 @@ while true do
 
     let rec printProcessTree depth processTree =
         let percentMemoryUsage =
-            ((float processTree.CumulativeMemoryUsage / float memoryStatusEx.ullTotalPhys) * 100.)
+            ((float processTree.CumulativeMemoryUsage / float memoryStatusEx.ullTotalPhys)
+             * 100.)
+
         let color =
-            if percentMemoryUsage > 30. then
-                "red"
-            elif percentMemoryUsage > 20. then
-                "darkorange"
-            elif percentMemoryUsage > 10. then
-                "yellow"
-            else
-                "grey"
-        
+            if percentMemoryUsage > 30. then "red"
+            elif percentMemoryUsage > 20. then "darkorange"
+            elif percentMemoryUsage > 10. then "yellow"
+            else "grey"
+
         let paddingLeft = (String.replicate depth "    ")
         let memoryUsage = printMemoryUsage processTree.CumulativeMemoryUsage
-        
+
         // printfn $"%s{paddingLeft}%s{processTree.Name} (Pid: {processTree.Pid}) {memoryUsage}"
-        AnsiConsole.MarkupLineInterpolated $"[bold]{paddingLeft}{processTree.Name}[/] (Pid: {processTree.Pid}) [{color}]{memoryUsage}[/] {percentMemoryUsage:f2} %%"
+        AnsiConsole.MarkupLineInterpolated
+            $"[bold]{paddingLeft}{processTree.Name}[/] (Pid: {processTree.Pid}) [{color}]{memoryUsage}[/] {percentMemoryUsage:f2} %%"
 
         processTree.Children
         |> List.sortByDescending (_.CumulativeMemoryUsage)
         |> List.iter (printProcessTree (depth + 1))
+
+    updateProcessTreePriority (Some "rider64") processTrees ProcessPriorityClass.AboveNormal
+    updateProcessTreePriority (Some "ms-teams") processTrees ProcessPriorityClass.BelowNormal
+    updateProcessTreePriority (Some "olk") processTrees ProcessPriorityClass.BelowNormal // Outlook
+    
 
     printfn "----------------------"
     printfn $"Total memory usage    : {printMemoryUsage totalMemoryUsage} ({percentMemoryUsage}%%)"
