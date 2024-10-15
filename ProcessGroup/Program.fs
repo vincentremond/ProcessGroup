@@ -1,4 +1,6 @@
-﻿open System
+﻿module Program
+
+open System
 open System.ComponentModel
 open System.Diagnostics
 open System.Reflection
@@ -6,20 +8,15 @@ open System.Text.RegularExpressions
 open Microsoft.FSharp.Core
 open Vanara.PInvoke
 open Spectre.Console
+open ProcessGroup.Tools
 
-[<RequireQualifiedAccess>]
-module List =
-    let split predicate list =
-
-        List.foldBack
-            (fun x (matching, notMatching) ->
-                if predicate x then
-                    (x :: matching, notMatching)
-                else
-                    (matching, x :: notMatching)
-            )
-            list
-            ([], [])
+// Config
+let updatePriorityList = [
+    // "rider64", ProcessPriorityClass.AboveNormal
+    // "ms-teams", ProcessPriorityClass.BelowNormal
+    // "olk", ProcessPriorityClass.BelowNormal // Outlook
+    "ms-teams", ProcessPriorityClass.AboveNormal
+]
 
 type ProcessSummary = {
     Pid: int
@@ -37,12 +34,6 @@ type ProcessTree = {
     Children: ProcessTree list
 }
 
-let rec (|NestedException|_|) (e: exn) =
-    match e with
-    | null -> None
-    | :? 'a as e -> Some e
-    | e -> (|NestedException|_|) e.InnerException
-
 let getParentPid o : int option =
     try
         let processType = typeof<Process>
@@ -55,7 +46,7 @@ let getParentPid o : int option =
         let parentPid = parentProcessId.Invoke(o, [||]) :?> int
         Some parentPid
     with
-    | NestedException(e: Win32Exception) -> None
+    | NestedException(_: Win32Exception) -> None
     | NestedException(e: InvalidOperationException) when Regex.IsMatch(e.Message, "^Cannot process request because the process \\(\\d+\\) has exited") -> None
 
 while true do
@@ -65,7 +56,7 @@ while true do
     let tryGetPriorityClass (p: Process) =
         try
             Some p.PriorityClass
-        with NestedException(e: Win32Exception) ->
+        with NestedException(_: Win32Exception) ->
             None
 
     let processes =
@@ -139,7 +130,7 @@ while true do
                 updateProcessTreePriority None processTree.Children priority
             | _ -> ()
 
-    let processTrees, processSummaries as result = createProcessTree None processes
+    let processTrees, processSummaries as _result = createProcessTree None processes
 
     let printMemoryUsage (i: int64) =
         sprintf "%s MB" ((float i / 1024. / 1024.).ToString("0.00"))
@@ -149,7 +140,8 @@ while true do
 
     let totalMemoryUsage = processTrees |> List.sumBy (_.CumulativeMemoryUsage)
     let mutable memoryStatusEx = Kernel32.MEMORYSTATUSEX.Default
-    let globalMemoryStatusEx = Kernel32.GlobalMemoryStatusEx(&memoryStatusEx)
+    Kernel32.GlobalMemoryStatusEx(&memoryStatusEx)
+    |> expect true
 
     let percentMemoryUsage =
         ((float totalMemoryUsage / float memoryStatusEx.ullTotalPhys) * 100.)
@@ -177,10 +169,8 @@ while true do
         |> List.sortByDescending (_.CumulativeMemoryUsage)
         |> List.iter (printProcessTree (depth + 1))
 
-    updateProcessTreePriority (Some "rider64") processTrees ProcessPriorityClass.AboveNormal
-    updateProcessTreePriority (Some "ms-teams") processTrees ProcessPriorityClass.BelowNormal
-    updateProcessTreePriority (Some "olk") processTrees ProcessPriorityClass.BelowNormal // Outlook
-    
+    for name, priority in updatePriorityList do
+        updateProcessTreePriority (Some name) processTrees priority
 
     printfn "----------------------"
     printfn $"Total memory usage    : {printMemoryUsage totalMemoryUsage} ({percentMemoryUsage}%%)"
