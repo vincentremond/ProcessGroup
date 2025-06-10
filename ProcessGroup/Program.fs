@@ -7,7 +7,7 @@ open System.Reflection
 open System.Text.RegularExpressions
 open Microsoft.FSharp.Core
 open Vanara.PInvoke
-open Spectre.Console
+open Pinicola.FSharp.SpectreConsole
 open ProcessGroup.Tools
 
 // Config
@@ -47,11 +47,14 @@ let getParentPid o : int option =
         Some parentPid
     with
     | NestedException(_: Win32Exception) -> None
-    | NestedException(e: InvalidOperationException) when Regex.IsMatch(e.Message, "^Cannot process request because the process \\(\\d+\\) has exited") -> None
+    | NestedException(e: InvalidOperationException) when
+        Regex.IsMatch(e.Message, "^Cannot process request because the process \\(\\d+\\) has exited")
+        ->
+        None
 
 while true do
 
-    AnsiConsole.Clear()
+    AnsiConsole.clear ()
 
     let tryGetPriorityClass (p: Process) =
         try
@@ -140,12 +143,10 @@ while true do
 
     let totalMemoryUsage = processTrees |> List.sumBy (_.CumulativeMemoryUsage)
     let mutable memoryStatusEx = Kernel32.MEMORYSTATUSEX.Default
-    Kernel32.GlobalMemoryStatusEx(&memoryStatusEx)
-    |> expect true
+    Kernel32.GlobalMemoryStatusEx(&memoryStatusEx) |> expect true
 
     let percentMemoryUsage =
-        ((float totalMemoryUsage / float memoryStatusEx.ullTotalPhys) * 100.)
-            .ToString("0.0")
+        ((float totalMemoryUsage / float memoryStatusEx.ullTotalPhys) * 100.).ToString("0.0")
 
     let rec printProcessTree depth processTree =
         let percentMemoryUsage =
@@ -161,8 +162,7 @@ while true do
         let paddingLeft = (String.replicate depth "    ")
         let memoryUsage = printMemoryUsage processTree.CumulativeMemoryUsage
 
-        // printfn $"%s{paddingLeft}%s{processTree.Name} (Pid: {processTree.Pid}) {memoryUsage}"
-        AnsiConsole.MarkupLineInterpolated
+        AnsiConsole.markupLineInterpolated
             $"[bold]{paddingLeft}{processTree.Name}[/] (Pid: {processTree.Pid}) [{color}]{memoryUsage}[/] {percentMemoryUsage:f2} %%"
 
         processTree.Children
